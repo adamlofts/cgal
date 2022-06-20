@@ -3,8 +3,8 @@
 //
 // This file is part of CGAL (www.cgal.org).
 //
-// $URL$
-// $Id$
+// $URL: https://github.com/CGAL/cgal/blob/v5.4/Polygon_mesh_processing/include/CGAL/Polygon_mesh_slicer.h $
+// $Id: Polygon_mesh_slicer.h 263ad6b 2020-08-20T18:25:01+02:00 Dmitry Anisimov
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-Commercial
 //
 //
@@ -101,8 +101,10 @@ class Polygon_mesh_slicer
   typedef typename Traits::Point_3                                      Point_3;
   typedef typename Traits::FT                                                FT;
 
-/// typedefs for internal graph to get connectivity of the polylines
+
+public:/// typedefs for internal graph to get connectivity of the polylines
   typedef boost::variant<vertex_descriptor, edge_descriptor>     AL_vertex_info;
+private:
   typedef boost::adjacency_list <
                               boost::vecS,
                               boost::vecS,
@@ -152,22 +154,26 @@ class Polygon_mesh_slicer
     typename Traits_::Intersect_3 intersect_3;
     OutputIterator out;
     std::pair<AL_vertex_descriptor, AL_vertex_descriptor> nodes_for_orient;
+    std::back_insert_iterator<std::vector<std::vector<AL_vertex_info>>> faceOut;
 
     Polyline_visitor( TriangleMesh& tmesh,
                       AL_graph& al_graph,
                       const Plane_3& plane,
                       VertexPointMap vpmap,
                       const Traits_& traits,
-                      OutputIterator out)
+                      OutputIterator out,
+                      std::back_insert_iterator<std::vector<std::vector<AL_vertex_info>>> faceOut)
       : al_graph(al_graph)
       , m_tmesh(tmesh)
       , m_plane(plane)
       , m_vpmap(vpmap)
       , intersect_3( traits.intersect_3_object() )
       , out(out)
+      , faceOut(faceOut)
     {}
 
     std::vector< Point_3 > current_poly;
+    std::vector< AL_vertex_info > current_al_info;
 
     // returns true iff the polyline is not correctly oriented
     // Using the first edge is oriented such that the normal induced by the face
@@ -254,6 +260,7 @@ class Polygon_mesh_slicer
     void start_new_polyline()
     {
       current_poly.clear();
+      current_al_info.clear();
     }
 
     void add_node(AL_vertex_descriptor node_id)
@@ -265,6 +272,7 @@ class Polygon_mesh_slicer
           nodes_for_orient.second=node_id;
 
       AL_vertex_info v = al_graph[node_id];
+      current_al_info.push_back(v);
       if (const vertex_descriptor* vd_ptr = boost::get<vertex_descriptor>(&v) )
       {
         current_poly.push_back( get(m_vpmap, *vd_ptr) );
@@ -286,9 +294,12 @@ class Polygon_mesh_slicer
     void end_polyline()
     {
       CGAL_assertion(!current_poly.empty());
-      if(do_reverse_polyline())
+      if(do_reverse_polyline()) {
         std::reverse(current_poly.begin(), current_poly.end());
+        std::reverse(current_al_info.begin(), current_al_info.end());
+      }
       *out++=current_poly;
+      *faceOut++=current_al_info;
     }
   };
 
@@ -499,7 +510,7 @@ public:
    */
   template <class OutputIterator>
   OutputIterator operator() (const Plane_3& plane,
-                             OutputIterator out) const
+                             OutputIterator out, std::back_insert_iterator<std::vector<std::vector<AL_vertex_info>>> faceOut) const
   {
     CGAL_precondition(!plane.is_degenerate());
 
@@ -629,7 +640,7 @@ public:
     // putting them in the output iterator
     if (!UseParallelPlaneOptimization || app_info.first==-1)
     {
-      Polyline_visitor<OutputIterator, Traits> visitor(m_tmesh, al_graph, plane, m_vpmap, m_traits, out);
+      Polyline_visitor<OutputIterator, Traits> visitor(m_tmesh, al_graph, plane, m_vpmap, m_traits, out, faceOut);
       split_graph_into_polylines(al_graph, visitor);
       return visitor.out;
     }
@@ -639,7 +650,7 @@ public:
       App_traits app_traits(app_info.first, app_info.second, m_traits);
 
       Polyline_visitor<OutputIterator, App_traits> visitor
-        (m_tmesh, al_graph, plane, m_vpmap, app_traits, out);
+        (m_tmesh, al_graph, plane, m_vpmap, app_traits, out, faceOut);
       split_graph_into_polylines(al_graph, visitor);
       return visitor.out;
     }
